@@ -1,0 +1,22 @@
+{
+  "name": "vprok_parser",
+  "version": "0.0.1",
+  "description": "Тестовое задание от компании Cenix.pro",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "prepare": "husky install"
+  },
+  "author": "Evgeny Rusakov",
+  "license": "ISC",
+  "dependencies": {
+    "puppeteer": "^22.1.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.1.3",
+    "husky": "^9.0.11",
+    "prettier": "^3.2.5"
+  }
+}
