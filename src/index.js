@@ -1,16 +1,58 @@
 const puppeteer = require('puppeteer');
 const utils = require('./utils/utils'); // пользовательская функция для задержки выполнения
 const path = require('path');
+const {
+  cleanString,
+  writingToFile,
+  waitforme,
+  isElementVisible,
+  addDirectory,
+} = utils;
 
 (async () => {
+  const product = process.argv[2];
+  const region = process.argv[3];
+
+  if (!product || !region) {
+    console.log('Необходимо указать адрес ссылки и регион.');
+    console.log(
+      'Пример использования: node index.js https://www.vprok.ru/product/domik-v-derevne-dom-v-der-moloko-ster-3-2-950g--309202 "Санкт-Петербург и область"',
+    );
+    process.exit(1);
+  }
+
   const BASE_URL = 'https://www.vprok.ru/';
-  const BASE_CITIES_PATH = path.join(__dirname, 'base', 'base_cities.txt');
-  const BASE_PRODUCTIONS_PATH = path.join(
-    __dirname,
-    'base',
-    'base_products.txt',
-  );
-  const BASE_ERROR_LOGS = path.join(__dirname, 'base', 'errors.txt');
+
+  const BASE_DIR_PATH = path.join(__dirname, 'base', region);
+
+  const BASE_PRODUCT_INFO = path.join(BASE_DIR_PATH, 'product.txt');
+
+  const BASE_ERROR_LOGS = path.join(BASE_DIR_PATH, 'errors.txt');
+
+  const SELECT_REGION_SELECTOR = '//div[contains(@class, "Region_region")]';
+
+  const PRICE_DISCOUNT_SELECTOR =
+    '//div[contains(@class, "Buy_root")]//div[contains(@class, "PriceInfo_root")]//span[contains(@class, "Price_role_discount")]';
+
+  const PRICE_OLD_SELECTOR =
+    '//div[contains(@class, "Buy_root")]//div[contains(@class, "PriceInfo_root")]//span[contains(@class, "Price_role_old")] | //div[contains(@class, "Buy_root")]//div[contains(@class, "PriceInfo_root")]//span[contains(@class, "Price_role_regular")]';
+
+  const PRICE_REGULAR_SELECTOR =
+    '//div[contains(@class, "Buy_root")]//div[contains(@class, "PriceInfo_root")]//span[contains(@class, "Price_role_regular")]';
+
+  const REVIEWS_BUTTON_SELECTOR =
+    '//div[contains(@class, "ActionsRow_reviews")]//button[contains(@class, "ActionsRow_button")]';
+
+  const RATING_COUNT_SELECTOR =
+    '//div[contains(@class, "ActionsRow_stars")]//span[contains(@class, "Rating_value")]';
+
+  const CLOSE_POPUP_BUTTON =
+    '//div[contains(@class, "Tooltip_root")]//button[contains(@class, "Tooltip_closeIcon")]';
+
+  const CURRENT_CITY_SELECTOR = `//li[contains(text(), "${region}")]`;
+
+  const TITLE_PRODUCT_SELECTOR =
+    '//article[contains(@class, "Summary_productContainer")]//h4[contains(@class, "Summary_productTitle")]';
 
   const typeSelector = {
     pText: '::-p-text',
@@ -32,6 +74,8 @@ const path = require('path');
     ],
   });
 
+  await addDirectory(BASE_DIR_PATH);
+
   const page = await browser.newPage();
 
   // Устанавливаем разрешение окна браузера, как у обычного пользователя
@@ -43,140 +87,145 @@ const path = require('path');
   //ожидаем перезагрузки страницы браузера
   await page.waitForNavigation({ timeout: 10000 });
 
-  const SELECT_REGION_SELECTOR = '//div[contains(@class, "Region_region")]';
+  console.log(`Сейчас начнется парсинг продуктов с города - ${region}`);
 
-  const cityCount = await utils.countLines(BASE_CITIES_PATH);
+  //-- продолжаем нажимать на кнопку пока она видна --//
+  let loadMoreVisible = await isElementVisible(
+    page,
+    `${typeSelector.pxPath}(${CLOSE_POPUP_BUTTON})`,
+  );
 
-  //--Создаем массивы, чтобы иметь доступ к асинхронной версии for и итерироваться по списку городов и продуктов--//
-  const arrCityForIterable = await utils.createLightweightArray(cityCount);
-
-  // eslint-disable-next-line no-unused-vars
-  for await (const iter of arrCityForIterable) {
-    let products = await utils.getLinesFile(BASE_PRODUCTIONS_PATH);
-    let count = 0;
-
-    const currrentCity = (
-      await utils.getLinesAndRewriteFile(BASE_CITIES_PATH, 1)
-    ).trim();
-
-    console.log(`Сейчас начнется парсинг продуктов с города - ${currrentCity}`);
-
-    try {
-      // Используйте page.$x для выполнения XPath запроса
-      const selectRegionElement = await page.$(
-        `${typeSelector.pxPath}(${SELECT_REGION_SELECTOR})`,
-      );
-      if (selectRegionElement) {
-        // Если элемент найден, выполните клик по нему
-        await selectRegionElement.click();
-      } else {
-        await browser.close();
-      }
-    } catch (e) {
-      console.log(`Не смогли перейти перейти к выбору региона`);
-      console.error(e);
-      await utils.writingToFile(
-        BASE_ERROR_LOGS,
-        `${new Date()} - ${e.message}`,
-      );
-    }
-
-    //await page.waitForNavigation({ timeout: 10000 });
-    await utils.waitforme(3000);
-
-    const CURRENT_CITY_SELECTOR = `//li[contains(text(), "${currrentCity}")]`;
-
-    try {
-      const regionElement = await page.$(
-        `${typeSelector.pxPath}(${CURRENT_CITY_SELECTOR})`,
-      );
-      if (regionElement) {
-        // Если элемент найден, выполните клик по нему
-        await regionElement.click();
-      } else {
-        await browser.close();
-      }
-    } catch (e) {
-      console.log(`Не смогли выбрать регион - ${currrentCity}`);
-      console.error(e);
-      await utils.writingToFile(
-        BASE_ERROR_LOGS,
-        `${new Date()} - ${e.message}`,
-      );
-    }
-
-    await utils.waitforme(3000);
-
-    // eslint-disable-next-line no-unused-vars
-    while (products !== null) {
-      const res = await utils.getElementsFromArray(products, 15);
-      console.log(res.cutElements);
-      if (res === null) {
-        products = null;
-        return;
-      }
-      products = res.cutArray;
-      const pages = await Promise.all(
-        // eslint-disable-next-line no-unused-vars
-        res.cutElements.map((url) => {
-          return browser.newPage();
-        }),
-      ); // Открытие вкладок для каждого продукта
-
-      await Promise.all(
-        pages.map(async (page, index) => {
-          page.waitForNavigation();
-          // console.log(res.cutElements[index]);
-          const productUrl = res.cutElements[index];
-          await page.goto(productUrl); // Переход на страницу продукта
-          await utils.waitforme(3000); // Ожидание 10 секунд
-          try {
-            await page.screenshot({
-              path: `${count++}_${currrentCity}_screenshot.jpeg`,
-              type: 'jpeg',
-              quality: 100,
-              fullPage: true,
-            });
-          } catch (e) {
-            console.log(
-              `Не смогли сделать скриншот на странице товара - ${res.cutElements[index]}`,
-            );
-            console.error(e);
-            await utils.writingToFile(
-              BASE_ERROR_LOGS,
-              `${new Date()} - ${e.message}`,
-            );
-          }
-          await page.close(); // Закрытие вкладки
-        }),
-      );
-    }
+  while (loadMoreVisible) {
+    await page
+      .click(`${typeSelector.pxPath}(${CLOSE_POPUP_BUTTON})`)
+      .catch(() => {});
+    loadMoreVisible = await isElementVisible(
+      page,
+      `${typeSelector.pxPath}(${CLOSE_POPUP_BUTTON})`,
+    );
   }
+
+  try {
+    const selectRegionElement = await page.$(
+      `${typeSelector.pxPath}(${SELECT_REGION_SELECTOR})`,
+    );
+    if (selectRegionElement) {
+      await selectRegionElement.click();
+    } else {
+      await browser.close();
+    }
+  } catch (e) {
+    console.log(`Не смогли перейти перейти к выбору региона`);
+    console.error(e);
+    await writingToFile(BASE_ERROR_LOGS, `${new Date()} - ${e.message}`);
+  }
+
+  await waitforme(3000);
+
+  try {
+    const regionElement = await page.$(
+      `${typeSelector.pxPath}(${CURRENT_CITY_SELECTOR})`,
+    );
+    if (regionElement) {
+      await regionElement.click();
+    } else {
+      await browser.close();
+    }
+  } catch (e) {
+    console.log(`Не смогли выбрать регион - ${region}`);
+    console.error(e);
+    await writingToFile(BASE_ERROR_LOGS, `${new Date()} - ${e.message}`);
+  }
+
+  //await waitforme(3000);
+
+  try {
+    const selectRegionElement = await page.$(
+      `${typeSelector.pxPath}(${SELECT_REGION_SELECTOR})`,
+    );
+    if (selectRegionElement) {
+      await selectRegionElement.click();
+    } else {
+      await browser.close();
+    }
+  } catch (e) {
+    console.log(`Не смогли перейти перейти к выбору региона`);
+    console.error(e);
+    await writingToFile(BASE_ERROR_LOGS, `${new Date()} - ${e.message}`);
+  }
+
+  await waitforme(3000);
+
+  try {
+    await Promise.all([page.waitForNavigation(), page.goto(product)]);
+
+    const priceRegularElement = await page.$(
+      `${typeSelector.pxPath}(${PRICE_REGULAR_SELECTOR})`,
+    );
+
+    const priceOldElements = await page.$(
+      `${typeSelector.pxPath}(${PRICE_OLD_SELECTOR})`,
+    );
+
+    const priceDiscountElement = await page.$(
+      `${typeSelector.pxPath}(${PRICE_DISCOUNT_SELECTOR})`,
+    );
+
+    const reviewsButtonElement = await page.$(
+      `${typeSelector.pxPath}(${REVIEWS_BUTTON_SELECTOR})`,
+    );
+
+    const ratingCountElement = await page.$(
+      `${typeSelector.pxPath}(${RATING_COUNT_SELECTOR})`,
+    );
+
+    const titleProductElement = await page.$(
+      `${typeSelector.pxPath}(${TITLE_PRODUCT_SELECTOR})`,
+    );
+
+    const price = priceDiscountElement
+      ? await page.evaluate((el) => el.textContent.trim(), priceDiscountElement)
+      : await page.evaluate((el) => el.textContent.trim(), priceRegularElement);
+
+    const reviewsCount = reviewsButtonElement
+      ? await page.evaluate((el) => el.textContent.trim(), reviewsButtonElement)
+      : null;
+
+    const ratingCount = ratingCountElement
+      ? await page.evaluate((el) => el.textContent.trim(), ratingCountElement)
+      : null;
+
+    const titleProduct = titleProductElement
+      ? await page.evaluate((el) => el.textContent.trim(), titleProductElement)
+      : null;
+
+    const priceOld = priceOldElements
+      ? await page.evaluate((el) => el.textContent.trim(), priceOldElements)
+      : null;
+
+    const safeRegion = region.replace(/[^a-zA-Z0-9а-яА-Я]/g, ''); // Удаляем все символы, кроме букв и цифр
+    const safeTitleProduct = titleProduct.replace(/[^a-zA-Z0-9а-яА-Я]/g, ''); // Удаляем все символы, кроме букв и цифр
+
+    const screenshotPath = path.join(
+      BASE_DIR_PATH,
+      `${safeRegion}_${safeTitleProduct}_screenshot.jpeg`,
+    );
+
+    await page.screenshot({
+      path: screenshotPath,
+      type: 'jpeg',
+      quality: 100,
+      fullPage: true,
+    });
+
+    const productInfo = `titleProduct ${titleProduct}\nprice ${await cleanString(price)}\npriceOld ${await cleanString(priceOld ? priceOld : 'скидок нет')}\nrating ${await cleanString(ratingCount)}\nreviewCount ${await cleanString(reviewsCount)}\n`;
+
+    await writingToFile(BASE_PRODUCT_INFO, productInfo);
+  } catch (e) {
+    console.log(`Не смогли перейти к выбору региона`);
+    console.error(e);
+    await writingToFile(BASE_ERROR_LOGS, `${new Date()} - ${e.message}`);
+  }
+
   await browser.close();
 })().catch((e) => console.error(e));
-
-// let productsCount = [];
-
-// for await (const iter of arrProductsForIterable) {
-//   const currentUrlProduct = await utils.getFirstLineAndRewriteFile(
-//     BASE_PRODUCTIONS_PATH,
-//   );
-
-//   await page.goto(currentUrlProduct, { waitUntil: 'networkidle2' });
-
-//   await utils.waitforme(5000);
-
-// try {
-//   await page.screenshot({
-//     path: `${count++}_screenshot.jpeg`,
-//     type: 'jpeg',
-//     quality: 100,
-//     fullPage: true,
-//   });
-// } catch (e) {
-//   console.log(
-//     `Не смогли сделать скриншот на странице товара - ${currentUrlProduct}`,
-//   );
-//   console.error(e);
-//   await utils.writingToFile(BASE_ERROR_LOGS, `${new Date()} - ${e.message}`);
-// }

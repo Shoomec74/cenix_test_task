@@ -59,12 +59,12 @@ async function getElementsFromArray(array, count = 1) {
   let cutArray;
 
   if (count >= array.length) {
-    cutArray = array.slice(); // Возвращаем копию массива
-    cutElements = [...cutArray]; // Добавляем все элементы в массив вырезанных элементов
-    cutArray.length = 0; // Очищаем исходный массив
+    cutArray = array.slice();
+    cutElements = [...cutArray];
+    cutArray.length = 0;
   } else {
-    cutElements = [...array.slice(0, count)]; // Добавляем вырезанные элементы в массив вырезанных элементов
-    cutArray = [...array.slice(count)]; // Удаляем вырезанные элементы из исходного массива
+    cutElements = [...array.slice(0, count)];
+    cutArray = [...array.slice(count)];
   }
 
   return {
@@ -153,10 +153,6 @@ function countLines(filePath) {
   });
 }
 
-async function createLightweightArray(n) {
-  return new Array(n).fill(undefined);
-}
-
 async function getLinesFile(originalFilePath) {
   const readStream = fs.createReadStream(originalFilePath, {
     encoding: 'utf-8',
@@ -176,15 +172,24 @@ async function getLinesFile(originalFilePath) {
   return cleanedLines.filter((line) => line !== ''); // фильтрация пустых строк
 }
 
+//-- Метод проверки отображается ли кнопка загрузки --//
 const isElementVisible = async (page, selector) => {
   let visible = true;
-  await page
-    .waitForSelector(selector, { visible: true, timeout: 10000 })
-    .catch(() => {
-      visible = false;
-    });
+  const el = await page.$(selector);
+  if (!el) {
+    visible = false;
+  }
   return visible;
 };
+
+async function cleanString(input) {
+  // Удаляем все символы, кроме цифр, десятичных точек и пробелов
+  const cleaned = input.replace(/[^\d.,\s]/g, '');
+  // Заменяем запятые на точки для единообразия формата
+  const formatted = cleaned.replace(/,/g, '.');
+  // Возвращаем результат
+  return formatted;
+}
 
 module.exports = {
   addDirectory,
@@ -195,7 +200,7 @@ module.exports = {
   waitforme,
   getLinesAndRewriteFile,
   countLines,
-  createLightweightArray,
   getLinesFile,
   isElementVisible,
+  cleanString,
 };
