@@ -1,231 +1,217 @@
-const puppeteer = require('puppeteer');
-const utils = require('./utils/utils'); // пользовательская функция для задержки выполнения
+const vorpal = require('vorpal')();
+const { fork } = require('child_process');
 const path = require('path');
+const dotenv = require('dotenv');
+dotenv.config('../.env');
+
 const {
-  cleanString,
-  writingToFile,
-  waitforme,
-  isElementVisible,
-  addDirectory,
-} = utils;
+  SCREENSHOT_WORKER_NAME,
+  BROWSER_WORKER_NAME,
+  BASE_DIR_ASSETS,
+  BASE_DIR_WORKERS,
+  SCRAPING_WORKER_NAME,
+  REGION_CODES,
+} = process.env;
 
-(async () => {
-  const product = process.argv[2];
-  const region = process.argv[3];
+const BASE_PATH = path.join(__dirname);
 
-  if (!product || !region) {
-    console.log('Необходимо указать адрес ссылки и регион.');
-    console.log(
-      'Пример использования: node index.js https://www.vprok.ru/product/domik-v-derevne-dom-v-der-moloko-ster-3-2-950g--309202 "Санкт-Петербург и область"',
+const WORKERS_BASE_PATH = path.join(BASE_PATH, BASE_DIR_WORKERS);
+
+const ASSETS_BASE_PATH = path.join(BASE_PATH, BASE_DIR_ASSETS);
+
+const WORKERS = {};
+
+//-- Определение команды для Vorpal CLI --//
+vorpal
+  .command(
+    'parse <url> <region>',
+    'Starts parsing with the provided URL and region.',
+  )
+  .action(function (args, callback) {
+    const regionCodes = JSON.parse(REGION_CODES);
+    //-- Создание воркера для обработки браузера и отправка ему начальных данных --//
+    createWorker(
+      'browserWorker.js',
+      (msg) => handlerMessagesrWorker(msg, callback),
+      (err) => {
+        console.error(`Browser Worker error: ${err}`);
+        callback();
+      },
+      (code) => {
+        console.log(`${BROWSER_WORKER_NAME} exited with code ${code}`);
+      },
+      BROWSER_WORKER_NAME,
     );
-    process.exit(1);
-  }
-
-  const BASE_URL = 'https://www.vprok.ru/';
-
-  const BASE_DIR_PATH = path.join(__dirname, 'base', region);
-
-  const BASE_PRODUCT_INFO = path.join(BASE_DIR_PATH, 'product.txt');
-
-  const BASE_ERROR_LOGS = path.join(BASE_DIR_PATH, 'errors.txt');
-
-  const SELECT_REGION_SELECTOR = '//div[contains(@class, "Region_region")]';
-
-  const PRICE_DISCOUNT_SELECTOR =
-    '//div[contains(@class, "Buy_root")]//div[contains(@class, "PriceInfo_root")]//span[contains(@class, "Price_role_discount")]';
-
-  const PRICE_OLD_SELECTOR =
-    '//div[contains(@class, "Buy_root")]//div[contains(@class, "PriceInfo_root")]//span[contains(@class, "Price_role_old")] | //div[contains(@class, "Buy_root")]//div[contains(@class, "PriceInfo_root")]//span[contains(@class, "Price_role_regular")]';
-
-  const PRICE_REGULAR_SELECTOR =
-    '//div[contains(@class, "Buy_root")]//div[contains(@class, "PriceInfo_root")]//span[contains(@class, "Price_role_regular")]';
-
-  const REVIEWS_BUTTON_SELECTOR =
-    '//div[contains(@class, "ActionsRow_reviews")]//button[contains(@class, "ActionsRow_button")]';
-
-  const RATING_COUNT_SELECTOR =
-    '//div[contains(@class, "ActionsRow_stars")]//span[contains(@class, "Rating_value")]';
-
-  const CLOSE_POPUP_BUTTON =
-    '//div[contains(@class, "Tooltip_root")]//button[contains(@class, "Tooltip_closeIcon")]';
-
-  const CURRENT_CITY_SELECTOR = `//li[contains(text(), "${region}")]`;
-
-  const TITLE_PRODUCT_SELECTOR =
-    '//article[contains(@class, "Summary_productContainer")]//h4[contains(@class, "Summary_productTitle")]';
-
-  const typeSelector = {
-    pText: '::-p-text',
-    pxPath: '::-p-xpath',
-    pAria: '::-p-aria',
-    pGetById: '::-p-getById',
-  };
-
-  const browser = await puppeteer.launch({
-    headless: false, // Запуск браузера в режиме с графическим интерфейсом
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-infobars',
-      '--window-position=0,0',
-      '--ignore-certificate-errors',
-      '--ignore-certificate-errors-spki-list',
-      `--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36`, // Установка пользовательского агента
-    ],
+    //-- Отправка данных для воркеру браузера --//
+    WORKERS[BROWSER_WORKER_NAME].send({
+      workerName: BROWSER_WORKER_NAME,
+      regionCodes: regionCodes,
+      url: args.url,
+      region: args.region,
+      pid: WORKERS[BROWSER_WORKER_NAME].pid,
+    });
   });
 
-  await addDirectory(BASE_DIR_PATH);
-
-  const page = await browser.newPage();
-
-  // Устанавливаем разрешение окна браузера, как у обычного пользователя
-  await page.setViewport({ width: 1280, height: 800 });
-
-  // Переходим на страницу
-  await page.goto(BASE_URL);
-
-  //ожидаем перезагрузки страницы браузера
-  await page.waitForNavigation({ timeout: 10000 });
-
-  console.log(`Сейчас начнется парсинг продуктов с города - ${region}`);
-
-  //-- продолжаем нажимать на кнопку пока она видна --//
-  let loadMoreVisible = await isElementVisible(
-    page,
-    `${typeSelector.pxPath}(${CLOSE_POPUP_BUTTON})`,
-  );
-
-  while (loadMoreVisible) {
-    await page
-      .click(`${typeSelector.pxPath}(${CLOSE_POPUP_BUTTON})`)
-      .catch(() => {});
-    loadMoreVisible = await isElementVisible(
-      page,
-      `${typeSelector.pxPath}(${CLOSE_POPUP_BUTTON})`,
+vorpal
+  .catch('[words...]', 'Catches incorrect commands')
+  .action(function (args, callback) {
+    this.log('Вы ввели команду, которая не может быть обработана.');
+    this.log(
+      'Убедитесь, что вы заключили в кавычки регион например вот так - "Москва и область"',
     );
+    callback();
+  });
+
+vorpal.delimiter('vprokParser$').parse(process.argv);
+
+//-- Функция обработки сообщений от воркеров --//
+function handlerMessagesrWorker(msg, callback) {
+  const { payload } = msg;
+  //-- кастомный обработчик ошибок от воркеров для перезапуска или прочих тасок --//
+  if (payload.type === 'error') {
+    handlerErrorsWorker(msg, callback);
+    return;
   }
+  switch (payload.workerName) {
+    case BROWSER_WORKER_NAME:
+      if (payload.code === 200) {
+        //-- Создание воркера для скриншотов и отправка ему данных --//
+        createWorker(
+          'screenshotWorker.js',
+          (msg) => handlerMessagesrWorker(msg, callback),
+          (err) => {
+            console.error(`Screenshot Worker error: ${err}`), callback();
+          },
+          (code) => {
+            console.log(`${SCREENSHOT_WORKER_NAME} exited with code ${code}`);
+          },
+          SCREENSHOT_WORKER_NAME,
+        );
 
-  try {
-    const selectRegionElement = await page.$(
-      `${typeSelector.pxPath}(${SELECT_REGION_SELECTOR})`,
-    );
-    if (selectRegionElement) {
-      await selectRegionElement.click();
-    } else {
-      await browser.close();
-    }
-  } catch (e) {
-    console.log(`Не смогли перейти перейти к выбору региона`);
-    console.error(e);
-    await writingToFile(BASE_ERROR_LOGS, `${new Date()} - ${e.message}`);
+        const BASE_SCREENHOTS_PATH = path.join(
+          ASSETS_BASE_PATH,
+          payload.region,
+        );
+
+        WORKERS[SCREENSHOT_WORKER_NAME].send({
+          browserWSEndpoint: payload.wsEndpoint,
+          workerName: SCREENSHOT_WORKER_NAME,
+          url: payload.url,
+          region: payload.region,
+          screenshotsPath: BASE_SCREENHOTS_PATH,
+          pid: WORKERS[SCREENSHOT_WORKER_NAME].pid,
+        });
+      } else if (payload.code === 201) {
+        console.log(`Скриншот и данные успешно собраны`);
+        process.exit(0);
+      } else {
+        console.log(
+          `Необработанное сообщение от воркера ${BROWSER_WORKER_NAME} статуса - ${msg}`,
+        );
+      }
+      break;
+    case SCREENSHOT_WORKER_NAME:
+      if (payload.code === 200) {
+        //-- Логика обработки после скриншот воркера и создание воркера для скрапинга --//
+        createWorker(
+          'scrapingWorker.js',
+          (msg) => handlerMessagesrWorker(msg, callback),
+          (err) => {
+            console.error(`Screenshot Worker error: ${err}`), callback();
+          },
+          (code) => {
+            console.log(`${SCRAPING_WORKER_NAME} exited with code ${code}`);
+          },
+          SCRAPING_WORKER_NAME,
+        );
+
+        const BASE_PRODUCT_DATA_PATH = path.join(
+          ASSETS_BASE_PATH,
+          payload.region,
+        );
+
+        WORKERS[SCRAPING_WORKER_NAME].send({
+          browserWSEndpoint: payload.browserWSEndpoint,
+          workerName: SCRAPING_WORKER_NAME,
+          url: payload.url,
+          dataPath: BASE_PRODUCT_DATA_PATH,
+          pid: WORKERS[SCRAPING_WORKER_NAME].pid,
+        });
+      } else {
+        console.log(
+          `необработанное сообщение от воркера ${SCREENSHOT_WORKER_NAME} статуса - ${msg}`,
+        );
+      }
+      break;
+    case SCRAPING_WORKER_NAME:
+      if (payload.code === 200) {
+        //-- Завершием выполнение скрипта и выключаем браузер--//
+        WORKERS[BROWSER_WORKER_NAME].send({
+          workerName: BROWSER_WORKER_NAME,
+          exit: true,
+          pid: WORKERS[BROWSER_WORKER_NAME].pid,
+        });
+      } else {
+        console.log(
+          `необработанное сообщение от воркера ${SCRAPING_WORKER_NAME} статуса - ${msg}`,
+        );
+      }
+      break;
+    default:
+      console.log('Неизвестный тип воркера:', msg.worker);
   }
+}
 
-  await waitforme(3000);
-
-  try {
-    const regionElement = await page.$(
-      `${typeSelector.pxPath}(${CURRENT_CITY_SELECTOR})`,
-    );
-    if (regionElement) {
-      await regionElement.click();
-    } else {
-      await browser.close();
-    }
-  } catch (e) {
-    console.log(`Не смогли выбрать регион - ${region}`);
-    console.error(e);
-    await writingToFile(BASE_ERROR_LOGS, `${new Date()} - ${e.message}`);
+function handlerErrorsWorker(msg, callback) {
+  const { payload } = msg;
+  switch (payload.workerName) {
+    case BROWSER_WORKER_NAME:
+      console.log(
+        `Ошибка в воркере ${BROWSER_WORKER_NAME}. Информация для дебага:`,
+        payload.message,
+      );
+      //--Место для логики перезапуска или других действий. Пока что просто завершаем выполнение--//
+      callback();
+      break;
+    case SCREENSHOT_WORKER_NAME:
+      console.log(
+        `Ошибка в воркере ${SCREENSHOT_WORKER_NAME}. Информация для дебага:`,
+        payload.message,
+      );
+      //--Место для логики перезапуска или других действий--//
+      callback();
+      break;
+    case SCRAPING_WORKER_NAME:
+      console.log(
+        `Ошибка в воркере ${SCRAPING_WORKER_NAME}. Информация для дебага:`,
+        payload.message,
+      );
+      //--Место для логики перезапуска или других действий--//
+      callback();
+      break;
+    default:
+      console.log(`Неведомая ошибка`);
+      callback();
+      break;
   }
+}
 
-  //await waitforme(3000);
+function createWorker(
+  workerPath,
+  messageHandler,
+  errorHandler,
+  exitHandler,
+  name,
+) {
+  const fullWorkerPath = path.join(WORKERS_BASE_PATH, workerPath);
+  const worker = fork(fullWorkerPath);
+  WORKERS[name] = worker;
 
-  try {
-    const selectRegionElement = await page.$(
-      `${typeSelector.pxPath}(${SELECT_REGION_SELECTOR})`,
-    );
-    if (selectRegionElement) {
-      await selectRegionElement.click();
-    } else {
-      await browser.close();
-    }
-  } catch (e) {
-    console.log(`Не смогли перейти перейти к выбору региона`);
-    console.error(e);
-    await writingToFile(BASE_ERROR_LOGS, `${new Date()} - ${e.message}`);
-  }
+  console.log(`Запущен воркер c именем ${name} с PID: ${worker.pid}`);
 
-  await waitforme(3000);
+  worker.on('message', messageHandler);
+  worker.on('error', errorHandler);
+  worker.on('exit', exitHandler);
 
-  try {
-    await Promise.all([page.waitForNavigation(), page.goto(product)]);
-
-    const priceRegularElement = await page.$(
-      `${typeSelector.pxPath}(${PRICE_REGULAR_SELECTOR})`,
-    );
-
-    const priceOldElements = await page.$(
-      `${typeSelector.pxPath}(${PRICE_OLD_SELECTOR})`,
-    );
-
-    const priceDiscountElement = await page.$(
-      `${typeSelector.pxPath}(${PRICE_DISCOUNT_SELECTOR})`,
-    );
-
-    const reviewsButtonElement = await page.$(
-      `${typeSelector.pxPath}(${REVIEWS_BUTTON_SELECTOR})`,
-    );
-
-    const ratingCountElement = await page.$(
-      `${typeSelector.pxPath}(${RATING_COUNT_SELECTOR})`,
-    );
-
-    const titleProductElement = await page.$(
-      `${typeSelector.pxPath}(${TITLE_PRODUCT_SELECTOR})`,
-    );
-
-    const price = priceDiscountElement
-      ? await page.evaluate((el) => el.textContent.trim(), priceDiscountElement)
-      : await page.evaluate((el) => el.textContent.trim(), priceRegularElement);
-
-    const reviewsCount = reviewsButtonElement
-      ? await page.evaluate((el) => el.textContent.trim(), reviewsButtonElement)
-      : null;
-
-    const ratingCount = ratingCountElement
-      ? await page.evaluate((el) => el.textContent.trim(), ratingCountElement)
-      : null;
-
-    const titleProduct = titleProductElement
-      ? await page.evaluate((el) => el.textContent.trim(), titleProductElement)
-      : null;
-
-    const priceOld = priceOldElements
-      ? await page.evaluate((el) => el.textContent.trim(), priceOldElements)
-      : null;
-
-    const safeRegion = region.replace(/[^a-zA-Z0-9а-яА-Я]/g, ''); // Удаляем все символы, кроме букв и цифр
-    const safeTitleProduct = titleProduct.replace(/[^a-zA-Z0-9а-яА-Я]/g, ''); // Удаляем все символы, кроме букв и цифр
-
-    const screenshotPath = path.join(
-      BASE_DIR_PATH,
-      `${safeRegion}_${safeTitleProduct}_screenshot.jpeg`,
-    );
-
-    await page.screenshot({
-      path: screenshotPath,
-      type: 'jpeg',
-      quality: 100,
-      fullPage: true,
-    });
-
-    const productInfo = `titleProduct ${titleProduct}\nprice ${await cleanString(price)}\npriceOld ${await cleanString(priceOld ? priceOld : 'скидок нет')}\nrating ${await cleanString(ratingCount)}\nreviewCount ${await cleanString(reviewsCount)}\n`;
-
-    await writingToFile(BASE_PRODUCT_INFO, productInfo);
-  } catch (e) {
-    console.log(`Не смогли перейти к выбору региона`);
-    console.error(e);
-    await writingToFile(BASE_ERROR_LOGS, `${new Date()} - ${e.message}`);
-  }
-
-  await browser.close();
-})().catch((e) => console.error(e));
+  return worker;
+}

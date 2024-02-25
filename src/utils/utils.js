@@ -2,14 +2,6 @@ const fs = require('fs-extra');
 const { once } = require('events');
 const path = require('path');
 
-async function waitforme(millisec) {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve('');
-    }, millisec);
-  });
-}
-
 //--Создание директорий --//
 async function addDirectory(folderPath) {
   try {
@@ -21,56 +13,11 @@ async function addDirectory(folderPath) {
   }
 }
 
-//--Удаление директорий --//
-async function removeFolder(folderPath) {
-  try {
-    await fs.remove(folderPath);
-  } catch (err) {
-    console.error(err);
-  }
-}
-
-//--Копирование файлов директорий --//
-async function copyFiles(oldFilesPath, newFilesPath) {
-  try {
-    await fs.copyFile(oldFilesPath, newFilesPath);
-  } catch (err) {
-    console.error(err);
-  }
-}
-
 //--Запись текста в файл --//
 async function writingToFile(nameBase, text) {
   fs.appendFile(nameBase, `${text}\n`, (err) => {
     if (err) throw err;
   });
-}
-
-async function getElementsFromArray(array, count = 1) {
-  if (!Array.isArray(array) || array.length === 0) {
-    return null;
-  }
-
-  if (count <= 0) {
-    return null;
-  }
-
-  let cutElements;
-  let cutArray;
-
-  if (count >= array.length) {
-    cutArray = array.slice();
-    cutElements = [...cutArray];
-    cutArray.length = 0;
-  } else {
-    cutElements = [...array.slice(0, count)];
-    cutArray = [...array.slice(count)];
-  }
-
-  return {
-    cutArray,
-    cutElements,
-  };
 }
 
 async function getLinesAndRewriteFile(originalFilePath, numLines = 1) {
@@ -147,7 +94,6 @@ function countLines(filePath) {
     });
 
     readStream.on('error', (err) => {
-      // В случае ошибки чтения файла передаем ошибку в reject
       reject(err);
     });
   });
@@ -172,7 +118,7 @@ async function getLinesFile(originalFilePath) {
   return cleanedLines.filter((line) => line !== ''); // фильтрация пустых строк
 }
 
-//-- Метод проверки отображается ли кнопка загрузки --//
+//-- Метод проверки отображается ли элемент --//
 const isElementVisible = async (page, selector) => {
   let visible = true;
   const el = await page.$(selector);
@@ -180,6 +126,19 @@ const isElementVisible = async (page, selector) => {
     visible = false;
   }
   return visible;
+};
+
+//-- Метод проверки отображается ли элементы --//
+const areElementsVisible = async (page, selectors) => {
+  const visibleSelectors = [];
+  for (const selector of selectors) {
+    const element = await page.$(selector);
+    if (element) {
+      visibleSelectors.push(selector);
+      element.dispose();
+    }
+  }
+  return visibleSelectors;
 };
 
 async function cleanString(input) {
@@ -191,16 +150,25 @@ async function cleanString(input) {
   return formatted;
 }
 
+async function shuffle(arr) {
+  var j, temp;
+  for (let i = arr.length - 1; i > 0; i--) {
+    j = Math.floor(Math.random() * (i + 1));
+    temp = arr[j];
+    arr[j] = arr[i];
+    arr[i] = temp;
+  }
+  return arr;
+}
+
 module.exports = {
   addDirectory,
-  removeFolder,
-  copyFiles,
   writingToFile,
-  getElementsFromArray,
-  waitforme,
   getLinesAndRewriteFile,
   countLines,
   getLinesFile,
   isElementVisible,
   cleanString,
+  areElementsVisible,
+  shuffle,
 };
